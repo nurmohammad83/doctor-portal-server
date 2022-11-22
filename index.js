@@ -3,10 +3,10 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express()
+const Stripe = require("stripe")
 require('dotenv').config()
 const port = process.env.Port || 5000;
-
-
+const stripe = Stripe(process.env.DB_STRIP_SK)
 
 app.use(cors())
 app.use(express.json())
@@ -32,13 +32,29 @@ function verifyJWT(req,res,next){
 }
 
 async function run (){
+
+
     
   try {
     const appointmentOptionCollection = client.db('doctorPortal').collection('appointmentOption')
     const bookingsCollection = client.db('doctorPortal').collection('bookings')
     const usersCollection = client.db('doctorPortal').collection('users')
     const doctorsCollection = client.db('doctorPortal').collection('doctors')
+    const paymentsCollection = client.db('doctorPortal').collection('payments')
   
+//Make Sure you use verifyAdmin after verifyJwt
+    const verifyAdmin =async(req,res,next)=>{
+      const decodedEmail = req.decoded.email
+        const query = {email: decodedEmail}
+        const user = await usersCollection.findOne(query)
+        if(user?.role !== 'admin'){
+          res.status(403).send({message: 'Forbidden Access'})
+        }
+        next()
+    }
+
+    // AppointmentCollection
+
     app.get('/appointmentOptions',async (req,res)=>{
      
       const date = req.query.date
@@ -48,7 +64,7 @@ async function run (){
       const bookingQuery= {appointmentDate : date}
       const alreadyBooked = await bookingsCollection.find(bookingQuery).toArray()
 
-      // code carefuly Declear
+      // code carefully  
       options.forEach(option => {
         const optionBooked = alreadyBooked.filter(book => book.patientTreatment === option.name);
         const bookedSlots = optionBooked.map(book => book.slot);
@@ -66,6 +82,46 @@ async function run (){
       res.send(specialty)
     })
 
+    // BookingCollection
+
+    app.post('/create-payment-intent', async (req, res) => {
+      const booking = req.body;
+      const price = booking.price;
+      const amount = price * 100;
+      console.log(amount)
+      const paymentIntent = await stripe.paymentIntents.create({
+          currency: 'usd',
+          amount: amount,
+          "payment_method_types": [
+              "card"
+          ]
+      });
+      res.send({
+          clientSecret: paymentIntent.client_secret,
+      });
+  });
+
+    app.post('/payments',async(req,res)=>{
+      const payment = req.body;
+      const result = await paymentsCollection.insertOne(payment);
+      const id = payment.bookingId;
+      const filter = {_id:ObjectId(id)}
+      const updateDoc= {
+        $set: {
+          paid: true,
+          transactionId: payment.transactionId
+        }
+      }
+      const updatedResult = await bookingsCollection.updateOne(filter,updateDoc)
+
+      res.send(result)
+    })
+    app.get('/bookings/:id',async(req,res)=>{
+      const id = req.params.id
+      const query = { _id: ObjectId(id)}
+      const result = await bookingsCollection.findOne(query)
+      res.send(result)
+    })
     app.get('/bookings',verifyJWT, async(req,res)=>{
       const email = req.query.email;
       const decodedEmail = req.decoded.email;
@@ -80,7 +136,9 @@ async function run (){
     app.post('/bookings', async (req,res)=>{
       const booking = req.body
       const query = {
-        appointmentDate:booking.appointmentDate
+        appointmentDate:booking.appointmentDate,
+        email:booking.email,
+        patientTreatment:booking.patientTreatment
       }
 
       const alreadyBooked = await bookingsCollection.find(query).toArray() 
@@ -94,6 +152,7 @@ async function run (){
       res.send(result)
     })
 
+    // Jwt Access 
     app.get('/jwt', async(req,res)=>{
       const email = req.query.email
       const query = {email: email}
@@ -105,6 +164,9 @@ async function run (){
       }
       res.status(403).send({accessToken: ''})
     })
+
+
+    // UsersCollection API
 
     app.get('/users', async(req,res)=>{
       const query = {}
@@ -127,13 +189,7 @@ async function run (){
       res.send(result)
     })
 
-    app.put('/users/admin/:id',verifyJWT, async(req,res)=>{
-      const decodedEmail = req.decoded.email
-      const query = {email: decodedEmail}
-      const user = await usersCollection.findOne(query)
-      if(user?.role !== 'admin'){
-        res.status(403).send({message: 'Forbidden Access'})
-      }
+    app.put('/users/admin/:id',verifyJWT,verifyAdmin, async(req,res)=>{
       const id = req.params.id;
       const filter = {_id: ObjectId(id)}
       const options = { upsert: true }
@@ -146,22 +202,36 @@ async function run (){
       res.send(result)
     })
 
-
-    app.get('/',(req,res)=>{
-      res.send('Doctor Aschen')
-    })
+    // app.get('/addPrice', async(req,res)=>{
+    //   const filetr ={}
+    //   const option = {upsert:true}
+    //   const updateDoc = {
+    //     $set:{
+    //       price: 88
+    //     }
+    //   } 
+    //   const result=await appointmentOptionCollection.updateMany(filetr,updateDoc,option)
+    //   res.send(result)
+    // })
+    // DoctorCollection API
 
     app.get('/doctors', async(req,res)=>{
       const query = {}
       const result= await doctorsCollection.find(query).toArray()
       res.send(result)
     })
-    app.post('/doctors', async(req,res)=>{
+    app.post('/doctors',verifyJWT,verifyAdmin, async(req,res)=>{
       const doctor  = req.body;
       const result = await doctorsCollection.insertOne(doctor)
       res.send(result)
     })
 
+    app.delete('/doctors/:id',verifyJWT,verifyAdmin, async(req,res)=>{
+      const id = req.params.id;
+      const filter={_id:ObjectId(id)}
+      const result = await doctorsCollection.deleteOne(filter)
+      res.send(result)
+    })
   } catch (error) {
     console.log(error);
   }
@@ -172,6 +242,13 @@ run()
 app.listen(port,()=>{
   console.log('doctor Protal running on ',port);
 })
+
+
+
+
+
+
+
 // app.get('/v2/appointmentOptions', async(req,res)=>{
 //   const date = req.query.date;
 //   const options = await appointmentOptionCollection.aggregate([
@@ -196,6 +273,7 @@ app.listen(port,()=>{
 //     {
 //       project:{
 //         name:1,
+//         price:1,
 //         slot:1,
 //         booked:{
 //           $map:{
