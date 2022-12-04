@@ -3,6 +3,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express()
+const nodemailer = require('nodemailer');
 const Stripe = require("stripe")
 require('dotenv').config()
 const port = process.env.Port || 5000;
@@ -14,6 +15,44 @@ app.use(express.json())
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.tcnszhx.mongodb.net/?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
 
+
+function sendBookingEmail(booking){
+  const {patientTreatment,email,appointmentDate,slot}=booking
+  let transporter = nodemailer.createTransport({
+
+    host: "smtp.sendgrid.net",
+    port: 587,
+    auth: {
+      user: 'apikey', 
+      pass: process.env.SENDGRID_API_KEY,
+    },
+  })
+  transporter.sendMail({
+    from: "pesfootball83@gmail.com", // verified sender email
+    to: email, // recipient email
+    subject: `Your appointment for ${patientTreatment} is confirmed`, // Subject line
+    text: "Hello world!", // plain text body
+    html: `
+    <h3>Your Appointment is confirmed</h3>
+    <div>
+    
+    <p>
+    Your appointment for treatment : ${patientTreatment}
+    </p>
+    <p>
+    Please visit us on : ${appointmentDate} at ${slot}
+    </p>
+    </div>
+    
+    `, // html body
+  }, function(error, info){
+    if (error) {
+      console.log(error);
+    } else {
+      console.log('Email sent: ' + info.response);
+    }
+  });
+}
 
 function verifyJWT(req,res,next){
   const authHeaders = req.headers.authorization
@@ -32,9 +71,7 @@ function verifyJWT(req,res,next){
 }
 
 async function run (){
-
-
-    
+ 
   try {
     const appointmentOptionCollection = client.db('doctorPortal').collection('appointmentOption')
     const bookingsCollection = client.db('doctorPortal').collection('bookings')
@@ -122,6 +159,7 @@ async function run (){
       const result = await bookingsCollection.findOne(query)
       res.send(result)
     })
+    
     app.get('/bookings',verifyJWT, async(req,res)=>{
       const email = req.query.email;
       const decodedEmail = req.decoded.email;
@@ -149,6 +187,7 @@ async function run (){
       }
 
       const result = await bookingsCollection.insertOne(booking)
+      sendBookingEmail(booking)
       res.send(result)
     })
 
@@ -202,19 +241,6 @@ async function run (){
       res.send(result)
     })
 
-    // app.get('/addPrice', async(req,res)=>{
-    //   const filetr ={}
-    //   const option = {upsert:true}
-    //   const updateDoc = {
-    //     $set:{
-    //       price: 88
-    //     }
-    //   } 
-    //   const result=await appointmentOptionCollection.updateMany(filetr,updateDoc,option)
-    //   res.send(result)
-    // })
-    // DoctorCollection API
-
     app.get('/doctors', async(req,res)=>{
       const query = {}
       const result= await doctorsCollection.find(query).toArray()
@@ -232,6 +258,10 @@ async function run (){
       const result = await doctorsCollection.deleteOne(filter)
       res.send(result)
     })
+
+    app.get('/', (req,res)=>{
+      res.send('Doctor Achen')
+    })
   } catch (error) {
     console.log(error);
   }
@@ -242,57 +272,3 @@ run()
 app.listen(port,()=>{
   console.log('doctor Protal running on ',port);
 })
-
-
-
-
-
-
-
-// app.get('/v2/appointmentOptions', async(req,res)=>{
-//   const date = req.query.date;
-//   const options = await appointmentOptionCollection.aggregate([
-
-//     {
-//       $lookup:{
-//         from: 'bookings',
-//         localField: 'name',
-//         foreignField: 'treatment',
-//         pipeline:[
-//           {
-//             $match:{
-//               $expr:{
-//                 $eq:['appointmentDate', date]
-//               }
-//             }
-//           }
-//         ],
-//         as: 'booked'
-//       }  
-//     },
-//     {
-//       project:{
-//         name:1,
-//         price:1,
-//         slot:1,
-//         booked:{
-//           $map:{
-//             input:'$booked',
-//             as:'book',
-//             in:'$$book.slot'
-//           }
-//         }
-//       }
-//     },
-//     {
-//       $project:{
-//         name:1,
-//         slots:{
-//           $setDifference:['$slots', '$booked']
-//         }
-//       }
-//     }
-//   ]).toArray()
-//   res.send(options);
-
-// })
