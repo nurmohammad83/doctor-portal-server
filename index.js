@@ -43,7 +43,6 @@ function sendBookingEmail(booking){
     Please visit us on : ${appointmentDate} at ${slot}
     </p>
     </div>
-    
     `, // html body
   }, function(error, info){
     if (error) {
@@ -53,7 +52,6 @@ function sendBookingEmail(booking){
     }
   });
 }
-
 function verifyJWT(req,res,next){
   const authHeaders = req.headers.authorization
   if(!authHeaders){
@@ -67,9 +65,7 @@ function verifyJWT(req,res,next){
     req.decoded = decoded
     next();
   })
-
 }
-
 async function run (){
  
   try {
@@ -91,6 +87,7 @@ async function run (){
     }
 
     // AppointmentCollection
+    // -------------Get Api---------------
 
     app.get('/appointmentOptions',async (req,res)=>{
      
@@ -112,15 +109,60 @@ async function run (){
       
     })
     
+    app.get('/doctors', async(req,res)=>{
+      const query = {}
+      const result= await doctorsCollection.find(query).toArray()
+      res.send(result)
+    })
 
     app.get('/appointmentSpecialty', async(req,res)=>{
       const query = {}
       const specialty = await appointmentOptionCollection.find(query).project({name:1}).toArray()
       res.send(specialty)
     })
+    app.get('/bookings/:id',async(req,res)=>{
+      const id = req.params.id
+      const query = { _id: ObjectId(id)}
+      const result = await bookingsCollection.findOne(query)
+      res.send(result)
+    })
+    
+    app.get('/bookings',verifyJWT, async(req,res)=>{
+      const email = req.query.email;
+      const decodedEmail = req.decoded.email;
+      if(email !== decodedEmail){
+        return res.status(403).send({message: 'forbidden access'})
+      }
+      const query = {email: email}
+      const result = await bookingsCollection.find(query).toArray()
+      res.send(result)
+    })
 
-    // BookingCollection
+    app.get('/jwt', async(req,res)=>{
+      const email = req.query.email
+      const query = {email: email}
+      const user = await usersCollection.findOne(query)
+      console.log(user);
+      if(user){
+        const token = jwt.sign({email}, process.env.DB_ACCESS_TOKEN ,{expiresIn:'1h'})
+        res.send({accessToken: token})
+      }
+      res.status(403).send({accessToken: ''})
+    })
 
+    // UsersCollection API
+    app.get('/users', async(req,res)=>{
+      const query = {}
+      const users= await usersCollection.find(query).toArray()
+      res.send(users)
+    })
+    app.get('/users/admin/:email', async (req,res)=>{
+      const email = req.params.email;
+      const query = {email}
+      const user = await usersCollection.findOne(query)
+      res.send({isAdmin: user?.role === 'admin'})
+    })
+// -----------Post Api--------------
     app.post('/create-payment-intent', async (req, res) => {
       const booking = req.body;
       const price = booking.price;
@@ -153,23 +195,7 @@ async function run (){
 
       res.send(result)
     })
-    app.get('/bookings/:id',async(req,res)=>{
-      const id = req.params.id
-      const query = { _id: ObjectId(id)}
-      const result = await bookingsCollection.findOne(query)
-      res.send(result)
-    })
     
-    app.get('/bookings',verifyJWT, async(req,res)=>{
-      const email = req.query.email;
-      const decodedEmail = req.decoded.email;
-      if(email !== decodedEmail){
-        return res.status(403).send({message: 'forbidden access'})
-      }
-      const query = {email: email}
-      const result = await bookingsCollection.find(query).toArray()
-      res.send(result)
-    })
     
     app.post('/bookings', async (req,res)=>{
       const booking = req.body
@@ -178,9 +204,7 @@ async function run (){
         email:booking.email,
         patientTreatment:booking.patientTreatment
       }
-
       const alreadyBooked = await bookingsCollection.find(query).toArray() 
-      
       if(alreadyBooked.length){
         const message = `Your already Booking on ${booking?.appointmentDate}`
         return res.send({acknowledged: false,message})
@@ -191,43 +215,18 @@ async function run (){
       res.send(result)
     })
 
-    // Jwt Access 
-    app.get('/jwt', async(req,res)=>{
-      const email = req.query.email
-      const query = {email: email}
-      const user = await usersCollection.findOne(query)
-      console.log(user);
-      if(user){
-        const token = jwt.sign({email}, process.env.DB_ACCESS_TOKEN ,{expiresIn:'1h'})
-        res.send({accessToken: token})
-      }
-      res.status(403).send({accessToken: ''})
-    })
-
-
-    // UsersCollection API
-
-    app.get('/users', async(req,res)=>{
-      const query = {}
-      const users= await usersCollection.find(query).toArray()
-      res.send(users)
-    })
-    
-
-    app.get('/users/admin/:email', async (req,res)=>{
-      const email = req.params.email;
-      const query = {email}
-      const user = await usersCollection.findOne(query)
-      res.send({isAdmin: user?.role === 'admin'})
-    })
-
-
     app.post('/users', async (req,res)=>{
       const user = req.body
       const result = await usersCollection.insertOne(user)
       res.send(result)
     })
 
+    app.post('/doctors',verifyJWT,verifyAdmin, async(req,res)=>{
+      const doctor  = req.body;
+      const result = await doctorsCollection.insertOne(doctor)
+      res.send(result)
+    })
+// -----------Put Api----------
     app.put('/users/admin/:id',verifyJWT,verifyAdmin, async(req,res)=>{
       const id = req.params.id;
       const filter = {_id: ObjectId(id)}
@@ -241,16 +240,8 @@ async function run (){
       res.send(result)
     })
 
-    app.get('/doctors', async(req,res)=>{
-      const query = {}
-      const result= await doctorsCollection.find(query).toArray()
-      res.send(result)
-    })
-    app.post('/doctors',verifyJWT,verifyAdmin, async(req,res)=>{
-      const doctor  = req.body;
-      const result = await doctorsCollection.insertOne(doctor)
-      res.send(result)
-    })
+   
+  // ---------------Delete Api--------------
 
     app.delete('/doctors/:id',verifyJWT,verifyAdmin, async(req,res)=>{
       const id = req.params.id;
@@ -258,7 +249,17 @@ async function run (){
       const result = await doctorsCollection.deleteOne(filter)
       res.send(result)
     })
+    app.delete('/users/:id', async (req, res) => {
+      const id = req.params.id;
+      console.log(id)
+      const query = { _id: ObjectId(id) }
+      const result = await usersCollection.deleteOne(query)
+      res.send(result)
+  })
 
+
+
+  // Optional Api
     app.get('/', (req,res)=>{
       res.send('Doctor Achen')
     })
